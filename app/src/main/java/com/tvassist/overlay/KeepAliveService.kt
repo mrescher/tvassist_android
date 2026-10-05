@@ -49,6 +49,10 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import com.tvassist.ui.notify.NotificationEnlarged
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import android.os.SystemClock
+import androidx.core.content.ContextCompat
 
 /**
  * Keeps the app process (and its HA WebSocket connection) resident so the control overlay is
@@ -56,6 +60,17 @@ import com.tvassist.ui.notify.NotificationEnlarged
  * notification overlay window that displays pushed toasts/banners.
  */
 class KeepAliveService : Service() {
+    // Philips/TP Vision: die Assistant-Taste der Fernbedienung erzeugt kein KeyEvent, sondern
+    // diesen (ungeschützten) Broadcast vom Bluetooth-Dienst.
+    private var lastVoiceKeyAt = 0L
+    private val voiceKeyReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val now = SystemClock.uptimeMillis()
+            val repeat = now - lastVoiceKeyAt < VOICE_KEY_DEBOUNCE_MS
+            lastVoiceKeyAt = now
+            if (!repeat) app.voice.trigger()
+        }
+    }
     private val app get() = application as TvAssistApp
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val appearance = MutableStateFlow(OverlayAppearance())
@@ -213,6 +228,12 @@ class KeepAliveService : Service() {
                 }
             }
         }
+        ContextCompat.registerReceiver(
+            this,
+            voiceKeyReceiver,
+            IntentFilter("org.droidtv.intent.action.PRESS_VOICE_KEY"),
+            ContextCompat.RECEIVER_EXPORTED,
+        )
     }
 
     // Why the notification window is up. Tracked separately because the two conditions change
@@ -393,6 +414,7 @@ class KeepAliveService : Service() {
     }
 
     override fun onDestroy() {
+        runCatching { unregisterReceiver(voiceKeyReceiver) }
         stopServer()
         removeNotifWindow()
         // The TTS engine is app-scoped now and outlives this service, so it is deliberately not
@@ -404,6 +426,7 @@ class KeepAliveService : Service() {
     }
 
     companion object {
+        private const val VOICE_KEY_DEBOUNCE_MS = 500L
         private const val CHANNEL_ID = "tv_assist_keepalive"
         private const val NOTIFICATION_ID = 1002
         private const val TAG = "KeepAliveService"

@@ -188,7 +188,10 @@ class DeviceRecognizerSession(
             if (answering || _state.value is VoiceState.Done) return
             // These two are states it does not reliably come back from, so the shared binding is
             // dropped and the next press builds a new one. Everything else keeps it.
-            if (error == SpeechRecognizer.ERROR_CLIENT || error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
+            if (error == SpeechRecognizer.ERROR_CLIENT ||
+                error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ||
+                error == 11 // ERROR_SERVER_DISCONNECTED (API 31)
+            ) {
                 SharedRecognizer.discard()
             }
             // The first press of a process is what starts Google's recognition service, and for the
@@ -333,6 +336,9 @@ class DeviceRecognizerSession(
     private fun release() {
         recognizer?.let { r -> runCatching { r.cancel() } }
         recognizer = null
+        // Philips/TP Vision: Die Audio-Brücke der Fernbedienung entsteht nur für eine frische
+        // Verbindung zum Erkennungsdienst. Deshalb nach jeder Anfrage neu binden.
+        SharedRecognizer.discard()
     }
 
     private fun firstResult(bundle: Bundle?): String =
